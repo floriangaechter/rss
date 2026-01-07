@@ -4,8 +4,10 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/floriangaechter/rss/internal/store"
 	"github.com/floriangaechter/rss/internal/utils"
@@ -21,6 +23,22 @@ func NewFeedHanlder(feedStore store.FeedStore, logger *log.Logger) *FeedHandler 
 		feedStore: feedStore,
 		logger:    logger,
 	}
+}
+
+type CreateFeedInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Link        string `json:"link"`
+}
+
+func (in *CreateFeedInput) ValidateFeed() error {
+	if strings.TrimSpace(in.Title) == "" {
+		return errors.New("title is required")
+	}
+	if strings.TrimSpace(in.Link) == "" {
+		return errors.New("link is required")
+	}
+	return nil
 }
 
 func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request) {
@@ -46,12 +64,23 @@ func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request)
 }
 
 func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) {
-	var feed store.Feed
-	err := json.NewDecoder(r.Body).Decode(&feed)
+	var in CreateFeedInput
+	err := json.NewDecoder(r.Body).Decode(&in)
 	if err != nil {
 		fh.logger.Printf("ERROR: decoding HandleCreateFeed: %v", err)
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid request"})
 		return
+	}
+
+	if err := in.ValidateFeed(); err != nil {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": err.Error()})
+		return
+	}
+
+	feed := store.Feed{
+		Title:       in.Title,
+		Description: in.Description,
+		Link:        in.Link,
 	}
 
 	createdFeed, err := fh.feedStore.CreateFeed(&feed)
