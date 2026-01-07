@@ -3,13 +3,13 @@ package app
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/floriangaechter/rss/internal/api"
 	"github.com/floriangaechter/rss/internal/store"
+	"github.com/floriangaechter/rss/internal/utils"
 	"github.com/floriangaechter/rss/migrations"
 )
 
@@ -33,7 +33,7 @@ func NewApplication() (*Application, error) {
 
 	feedStore := store.NewSqlite3FeedStore(sqliteDB)
 
-	feedHandler := api.NewFeedHanlder(feedStore)
+	feedHandler := api.NewFeedHanlder(feedStore, logger)
 
 	app := &Application{
 		Logger:      logger,
@@ -45,5 +45,5 @@ func NewApplication() (*Application, error) {
 }
 
 func (a *Application) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, "Status is available\n")
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{"ping": "pong"})
 }

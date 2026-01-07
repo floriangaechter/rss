@@ -33,6 +33,7 @@ type FeedStore interface {
 	CreateFeed(*Feed) (*Feed, error)
 	GetFeedByID(id int64) (*Feed, error)
 	UpdateFeed(*Feed) error
+	DeleteFeedByID(id int64) error
 }
 
 func (sqlite3 *Sqlite3FeedStore) CreateFeed(feed *Feed) (*Feed, error) {
@@ -40,7 +41,7 @@ func (sqlite3 *Sqlite3FeedStore) CreateFeed(feed *Feed) (*Feed, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	query := `
 		INSERT INTO feeds (
@@ -108,7 +109,7 @@ func (sqlite3 *Sqlite3FeedStore) GetFeedByID(id int64) (*Feed, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var item Item
@@ -133,7 +134,7 @@ func (sqlite3 *Sqlite3FeedStore) UpdateFeed(feed *Feed) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	query := `
 		UPDATE
@@ -145,6 +146,36 @@ func (sqlite3 *Sqlite3FeedStore) UpdateFeed(feed *Feed) error {
 		WHERE id = ?
 	`
 	result, err := tx.Exec(query, feed.Title, feed.Description, feed.Link, feed.ID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return tx.Commit()
+}
+
+func (sqlite3 *Sqlite3FeedStore) DeleteFeedByID(id int64) error {
+	tx, err := sqlite3.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `
+		DELETE FROM
+			feeds
+		WHERE id = ?
+	`
+
+	result, err := sqlite3.db.Exec(query, id)
 	if err != nil {
 		return err
 	}

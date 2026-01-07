@@ -11,9 +11,9 @@ func SetupRoutes(app *app.Application) *chi.Mux {
 
 	r.Get("/health", app.HealthCheck)
 	r.Get("/feeds/{id}", app.FeedHandler.HandleGetFeedByID)
-
 	r.Post("/feeds", app.FeedHandler.HandleCreateFeed)
 	r.Put("/feeds/{id}", app.FeedHandler.HandleUpdateFeedByID)
+	r.Delete("/feeds/{id}", app.FeedHandler.HandleDeleteFeedByID)
 
 	return r
 }

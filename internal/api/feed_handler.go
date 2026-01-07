@@ -2,98 +2,86 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
 
-	"strconv"
-
 	"github.com/floriangaechter/rss/internal/store"
-	"github.com/go-chi/chi/v5"
+	"github.com/floriangaechter/rss/internal/utils"
 )
 
 type FeedHandler struct {
 	feedStore store.FeedStore
+	logger    *log.Logger
 }
 
-func NewFeedHanlder(feedStore store.FeedStore) *FeedHandler {
+func NewFeedHanlder(feedStore store.FeedStore, logger *log.Logger) *FeedHandler {
 	return &FeedHandler{
 		feedStore: feedStore,
+		logger:    logger,
 	}
 }
 
 func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request) {
-	paramsFeedID := chi.URLParam(r, "id")
-	if paramsFeedID == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	feedID, err := strconv.ParseInt(paramsFeedID, 10, 64)
+	feedID, err := utils.ReadIDParam(r)
 	if err != nil {
-		http.NotFound(w, r)
+		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid feed id"})
 		return
 	}
 
 	feed, err := fh.feedStore.GetFeedByID(feedID)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "failed to fetch the feed", http.StatusInternalServerError)
+		fh.logger.Printf("ERROR: GetFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
 		return
 	}
 	if feed == nil {
-		fmt.Println("feed not found")
-		http.Error(w, "feed not found", http.StatusNotFound)
+		_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "feed not found"})
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(feed)
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{"feed": feed})
 }
 
 func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) {
 	var feed store.Feed
 	err := json.NewDecoder(r.Body).Decode(&feed)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "failed to create feed", http.StatusInternalServerError)
+		fh.logger.Printf("ERROR: decoding HandleCreateFeed: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid request"})
 		return
 	}
 
 	createdFeed, err := fh.feedStore.CreateFeed(&feed)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "failed to create feed", http.StatusInternalServerError)
+		fh.logger.Printf("ERROR: HandleCreateFeed: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(createdFeed)
+	_ = utils.WriteJSON(w, http.StatusCreated, utils.Envelope{"feed": createdFeed})
 }
 
+// HandleUpdateFeedByID updates a feed based on the ID
 func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Request) {
-	paramsFeedID := chi.URLParam(r, "id")
-	if paramsFeedID == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	feedID, err := strconv.ParseInt(paramsFeedID, 10, 64)
+	feedID, err := utils.ReadIDParam(r)
 	if err != nil {
-		http.NotFound(w, r)
+		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid feed id"})
 		return
 	}
 
 	feed, err := fh.feedStore.GetFeedByID(feedID)
 	if err != nil {
-		fmt.Println(err)
-		http.Error(w, "failed to fetch the feed", http.StatusInternalServerError)
+		fh.logger.Printf("ERROR: GetFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
 		return
 	}
 	if feed == nil {
-		fmt.Println("feed not found")
-		http.Error(w, "feed not found", http.StatusNotFound)
+		_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "feed not found"})
+		return
 	}
 
 	var updateFeedRequest struct {
@@ -103,7 +91,8 @@ func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Reque
 	}
 	err = json.NewDecoder(r.Body).Decode(&updateFeedRequest)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fh.logger.Printf("ERROR: decoding HandleUpdateFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid request"})
 		return
 	}
 
@@ -119,12 +108,33 @@ func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Reque
 
 	err = fh.feedStore.UpdateFeed(feed)
 	if err != nil {
-		fmt.Println("update error", err)
-		http.Error(w, "failed to update feed", http.StatusInternalServerError)
+		fh.logger.Printf("ERROR: HandleUpdateFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{"feed": feed})
+}
+
+func (fh *FeedHandler) HandleDeleteFeedByID(w http.ResponseWriter, r *http.Request) {
+	feedID, err := utils.ReadIDParam(r)
+	if err != nil {
+		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid feed id"})
+		return
+	}
+
+	err = fh.feedStore.DeleteFeedByID(feedID)
+	if err == sql.ErrNoRows {
+		http.Error(w, "feed not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		fh.logger.Printf("ERROR: DeleteFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
+		return
+	}
+
+	// TODO: check if that's the correct header, or if we need "No Content"
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(feed)
 }
