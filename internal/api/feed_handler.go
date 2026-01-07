@@ -64,23 +64,24 @@ func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request)
 }
 
 func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) {
-	var in CreateFeedInput
-	err := json.NewDecoder(r.Body).Decode(&in)
+	var req CreateFeedInput
+
+	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		fh.logger.Printf("ERROR: decoding HandleCreateFeed: %v", err)
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid request"})
 		return
 	}
 
-	if err := in.ValidateFeed(); err != nil {
+	if err := req.ValidateFeed(); err != nil {
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": err.Error()})
 		return
 	}
 
 	feed := store.Feed{
-		Title:       in.Title,
-		Description: in.Description,
-		Link:        in.Link,
+		Title:       req.Title,
+		Description: req.Description,
+		Link:        req.Link,
 	}
 
 	createdFeed, err := fh.feedStore.CreateFeed(&feed)

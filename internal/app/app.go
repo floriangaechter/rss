@@ -16,6 +16,8 @@ import (
 type Application struct {
 	Logger      *log.Logger
 	FeedHandler *api.FeedHandler
+	UserHandler *api.UserHandler
+	PageHander  *api.PageHandler
 	DB          *sql.DB
 }
 
@@ -32,12 +34,17 @@ func NewApplication() (*Application, error) {
 	}
 
 	feedStore := store.NewSqlite3FeedStore(sqliteDB)
+	userStore := store.NewSqlite3UserStore(sqliteDB)
 
 	feedHandler := api.NewFeedHanlder(feedStore, logger)
+	userHandler := api.NewUserHandler(userStore, logger)
+	pageHandler := api.NewPageHandler(logger)
 
 	app := &Application{
 		Logger:      logger,
 		FeedHandler: feedHandler,
+		UserHandler: userHandler,
+		PageHander:  pageHandler,
 		DB:          sqliteDB,
 	}
 
