@@ -7,10 +7,12 @@ import (
 
 type Feed struct {
 	ID          int    `json:"id"`
+	UserID      int    `json:"UserId"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Link        string `json:"link"`
 	Items       []Item `json:"items"`
+	UnreadCount int    `json:"unreadCount"`
 }
 
 type Item struct {
@@ -34,6 +36,7 @@ type FeedStore interface {
 	GetFeedByID(id int64) (*Feed, error)
 	UpdateFeed(*Feed) error
 	DeleteFeedByID(id int64) error
+	GetFeedsByUserID(userID int64) ([]*Feed, error)
 }
 
 func (sqlite3 *Sqlite3FeedStore) CreateFeed(feed *Feed) (*Feed, error) {
@@ -45,6 +48,7 @@ func (sqlite3 *Sqlite3FeedStore) CreateFeed(feed *Feed) (*Feed, error) {
 
 	query := `
 		INSERT INTO feeds (
+			user_id,
 			title,
 			description,
 			link
@@ -52,11 +56,12 @@ func (sqlite3 *Sqlite3FeedStore) CreateFeed(feed *Feed) (*Feed, error) {
 		VALUES (
 			?,
 			?,
+			?,
 			?
 		)
 		RETURNING id;
 	`
-	err = tx.QueryRow(query, feed.Title, feed.Description, feed.Link).Scan(&feed.ID)
+	err = tx.QueryRow(query, feed.UserID, feed.Title, feed.Description, feed.Link).Scan(&feed.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -190,4 +195,49 @@ func (sqlite3 *Sqlite3FeedStore) DeleteFeedByID(id int64) error {
 	}
 
 	return tx.Commit()
+}
+
+func (sqlite3 *Sqlite3FeedStore) GetFeedsByUserID(userID int64) ([]*Feed, error) {
+	query := `
+		SELECT
+			id,
+			user_id,
+			title,
+			description,
+			link,
+			(SELECT COUNT(*) FROM feed_items WHERE feed_id = feeds.id AND read_at IS NULL) AS unread_count
+		FROM
+			feeds
+		WHERE
+			user_id = ?
+		ORDER BY created_at DESC
+	`
+	rows, err := sqlite3.db.Query(query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var feeds []*Feed
+	for rows.Next() {
+		feed := &Feed{}
+		err = rows.Scan(
+			&feed.ID,
+			&feed.UserID,
+			&feed.Title,
+			&feed.Description,
+			&feed.Link,
+			&feed.UnreadCount,
+		)
+		if err != nil {
+			return nil, err
+		}
+		feeds = append(feeds, feed)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return feeds, nil
 }

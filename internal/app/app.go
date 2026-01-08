@@ -8,17 +8,20 @@ import (
 	"os"
 
 	"github.com/floriangaechter/rss/internal/api"
+	"github.com/floriangaechter/rss/internal/fetcher"
 	"github.com/floriangaechter/rss/internal/store"
 	"github.com/floriangaechter/rss/internal/utils"
 	"github.com/floriangaechter/rss/migrations"
 )
 
 type Application struct {
-	Logger      *log.Logger
-	FeedHandler *api.FeedHandler
-	UserHandler *api.UserHandler
-	PageHander  *api.PageHandler
-	DB          *sql.DB
+	Logger       *log.Logger
+	FeedHandler  *api.FeedHandler
+	UserHandler  *api.UserHandler
+	PageHander   *api.PageHandler
+	SessionStore store.SessionStore
+	UserStore    store.UserStore
+	DB           *sql.DB
 }
 
 func NewApplication() (*Application, error) {
@@ -34,18 +37,24 @@ func NewApplication() (*Application, error) {
 	}
 
 	feedStore := store.NewSqlite3FeedStore(sqliteDB)
+	feedItemStore := store.NewSqlite3FeedItemStore(sqliteDB)
 	userStore := store.NewSqlite3UserStore(sqliteDB)
+	sessionStore := store.NewSqlite3SessionStore(sqliteDB)
 
-	feedHandler := api.NewFeedHanlder(feedStore, logger)
-	userHandler := api.NewUserHandler(userStore, logger)
-	pageHandler := api.NewPageHandler(logger)
+	fetcher := fetcher.NewFetcher(feedStore, feedItemStore, logger)
+
+	feedHandler := api.NewFeedHanlder(feedStore, feedItemStore, fetcher, logger)
+	userHandler := api.NewUserHandler(userStore, sessionStore, logger)
+	pageHandler := api.NewPageHandler(feedStore, logger)
 
 	app := &Application{
-		Logger:      logger,
-		FeedHandler: feedHandler,
-		UserHandler: userHandler,
-		PageHander:  pageHandler,
-		DB:          sqliteDB,
+		Logger:       logger,
+		FeedHandler:  feedHandler,
+		UserHandler:  userHandler,
+		PageHander:   pageHandler,
+		DB:           sqliteDB,
+		SessionStore: sessionStore,
+		UserStore:    userStore,
 	}
 
 	return app, nil

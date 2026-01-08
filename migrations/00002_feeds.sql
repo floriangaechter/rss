@@ -2,7 +2,7 @@
 -- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS feeds (
   id INTEGER PRIMARY KEY,
-  -- user_id
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   description TEXT,
   link TEXT NOT NULL,

@@ -9,19 +9,24 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/floriangaechter/rss/internal/fetcher"
 	"github.com/floriangaechter/rss/internal/store"
 	"github.com/floriangaechter/rss/internal/utils"
 )
 
 type FeedHandler struct {
-	feedStore store.FeedStore
-	logger    *log.Logger
+	feedStore     store.FeedStore
+	feedItemStore store.FeedItemStore
+	fetcher       *fetcher.Fetcher
+	logger        *log.Logger
 }
 
-func NewFeedHanlder(feedStore store.FeedStore, logger *log.Logger) *FeedHandler {
+func NewFeedHanlder(feedStore store.FeedStore, feedItemStore store.FeedItemStore, fetcher *fetcher.Fetcher, logger *log.Logger) *FeedHandler {
 	return &FeedHandler{
-		feedStore: feedStore,
-		logger:    logger,
+		feedStore:     feedStore,
+		feedItemStore: feedItemStore,
+		fetcher:       fetcher,
+		logger:        logger,
 	}
 }
 
@@ -42,6 +47,12 @@ func (in *CreateFeedInput) ValidateFeed() error {
 }
 
 func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request) {
+	user := utils.GetUserFromContext(r)
+	if user == nil {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "unauthorized"})
+		return
+	}
+
 	feedID, err := utils.ReadIDParam(r)
 	if err != nil {
 		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
@@ -60,10 +71,22 @@ func (fh *FeedHandler) HandleGetFeedByID(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Check if feed belongs to the authenticated user
+	if feed.UserID != user.ID {
+		_ = utils.WriteJSON(w, http.StatusForbidden, utils.Envelope{"error": "access denied"})
+		return
+	}
+
 	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{"feed": feed})
 }
 
 func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) {
+	user := utils.GetUserFromContext(r)
+	if user == nil {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "unauthorized"})
+		return
+	}
+
 	var req CreateFeedInput
 
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -79,6 +102,7 @@ func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) 
 	}
 
 	feed := store.Feed{
+		UserID:      user.ID,
 		Title:       req.Title,
 		Description: req.Description,
 		Link:        req.Link,
@@ -94,8 +118,13 @@ func (fh *FeedHandler) HandleCreateFeed(w http.ResponseWriter, r *http.Request) 
 	_ = utils.WriteJSON(w, http.StatusCreated, utils.Envelope{"feed": createdFeed})
 }
 
-// HandleUpdateFeedByID updates a feed based on the ID
 func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Request) {
+	user := utils.GetUserFromContext(r)
+	if user == nil {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "unauthorized"})
+		return
+	}
+
 	feedID, err := utils.ReadIDParam(r)
 	if err != nil {
 		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
@@ -111,6 +140,12 @@ func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Reque
 	}
 	if feed == nil {
 		_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "feed not found"})
+		return
+	}
+
+	// Check if feed belongs to the authenticated user
+	if feed.UserID != user.ID {
+		_ = utils.WriteJSON(w, http.StatusForbidden, utils.Envelope{"error": "access denied"})
 		return
 	}
 
@@ -147,10 +182,34 @@ func (fh *FeedHandler) HandleUpdateFeedByID(w http.ResponseWriter, r *http.Reque
 }
 
 func (fh *FeedHandler) HandleDeleteFeedByID(w http.ResponseWriter, r *http.Request) {
+	user := utils.GetUserFromContext(r)
+	if user == nil {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "unauthorized"})
+		return
+	}
+
 	feedID, err := utils.ReadIDParam(r)
 	if err != nil {
 		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid feed id"})
+		return
+	}
+
+	// First check if feed exists and belongs to user
+	feed, err := fh.feedStore.GetFeedByID(feedID)
+	if err != nil {
+		fh.logger.Printf("ERROR: GetFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
+		return
+	}
+	if feed == nil {
+		_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "feed not found"})
+		return
+	}
+
+	// Check if feed belongs to the authenticated user
+	if feed.UserID != user.ID {
+		_ = utils.WriteJSON(w, http.StatusForbidden, utils.Envelope{"error": "access denied"})
 		return
 	}
 
@@ -165,6 +224,46 @@ func (fh *FeedHandler) HandleDeleteFeedByID(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// TODO: check if that's the correct header, or if we need "No Content"
 	w.WriteHeader(http.StatusOK)
+}
+
+func (fh *FeedHandler) HandleFetchFeedItems(w http.ResponseWriter, r *http.Request) {
+	user := utils.GetUserFromContext(r)
+	if user == nil {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "unauthorized"})
+		return
+	}
+
+	feedID, err := utils.ReadIDParam(r)
+	if err != nil {
+		fh.logger.Printf("ERROR: ReadIDParam: %v", err)
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "invalid feed id"})
+		return
+	}
+
+	feed, err := fh.feedStore.GetFeedByID(feedID)
+	if err != nil {
+		fh.logger.Printf("ERROR: GetFeedByID: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "internal server error"})
+		return
+	}
+	if feed == nil {
+		_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "feed not found"})
+		return
+	}
+
+	// Check if feed belongs to the authenticated user
+	if feed.UserID != user.ID {
+		_ = utils.WriteJSON(w, http.StatusForbidden, utils.Envelope{"error": "access denied"})
+		return
+	}
+
+	err = fh.fetcher.FetchFeedItems(feedID)
+	if err != nil {
+		fh.logger.Printf("ERROR: FetchFeedItems: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "failed to fetch feed items"})
+		return
+	}
+
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{"message": "feed items fetched successfully"})
 }

@@ -7,8 +7,10 @@ CREATE TABLE IF NOT EXISTS feed_items (
   description TEXT,
   link TEXT NOT NULL,
   published_at TEXT NOT NULL,
+  read_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  modified_at TEXT NOT NULL DEFAULT (datetime('now'))
+  modified_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(feed_id, link)
 );
 
 CREATE TRIGGER feed_items_modified_at

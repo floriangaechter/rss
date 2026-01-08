@@ -55,6 +55,7 @@ func NewSqlite3UserStore(db *sql.DB) *Sqlite3UserStore {
 type UserStore interface {
 	CreateUser(*User) error
 	GetUserByUsername(username string) (*User, error)
+	GetUserByID(id int) (*User, error)
 	UpdateUser(*User) error
 }
 
@@ -89,8 +90,36 @@ func (s *Sqlite3UserStore) GetUserByUsername(username string) (*User, error) {
 			username = ?
 	`
 
-	err := s.db.QueryRow(query, username).Scan(&user.ID, &user.Username)
-	if err != sql.ErrNoRows {
+	var passwordHash []byte
+	err := s.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &passwordHash)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	user.Password.hash = passwordHash
+	return user, nil
+}
+
+func (s *Sqlite3UserStore) GetUserByID(id int) (*User, error) {
+	user := &User{
+		Password: password{},
+	}
+
+	query := `
+		SELECT
+			id,
+			username
+		FROM
+			users
+		WHERE
+			id = ?
+	`
+
+	err := s.db.QueryRow(query, id).Scan(&user.ID, &user.Username)
+	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
